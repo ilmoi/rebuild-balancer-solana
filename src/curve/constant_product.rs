@@ -59,6 +59,24 @@ impl CurveCalculator for ConstantProductCurve {
             round_direction,
         )
     }
+
+    fn deposit_single_token_type(
+        &self,
+        source_amount: u128,
+        swap_token_a_amount: u128,
+        swap_token_b_amount: u128,
+        pool_supply: u128,
+        trade_direction: TradeDirection,
+    ) -> Option<u128> {
+        deposit_single_token_type(
+            source_amount,
+            swap_token_a_amount,
+            swap_token_b_amount,
+            pool_supply,
+            trade_direction,
+            RoundDirection::Floor,
+        )
+    }
 }
 
 // ----------------------------------------------------------------------------- helper fns
@@ -173,6 +191,34 @@ pub fn pool_tokens_to_trading_tokens(
         token_a_amount,
         token_b_amount,
     })
+}
+
+pub fn deposit_single_token_type(
+    source_amount: u128,
+    swap_token_a_amount: u128,
+    swap_token_b_amount: u128,
+    pool_supply: u128,
+    trade_direction: TradeDirection,
+    round_direction: RoundDirection,
+) -> Option<u128> {
+    let swap_source_amount = match trade_direction {
+        TradeDirection::AtoB => swap_token_a_amount,
+        TradeDirection::BtoA => swap_token_b_amount,
+    };
+    //the reverse of withdrawal - https://balancer.fi/whitepaper.pdf
+    let swap_source_amount = PreciseNumber::new(swap_source_amount)?;
+    let source_amount = PreciseNumber::new(source_amount)?;
+    let one = PreciseNumber::new(1)?;
+    let pool_supply = PreciseNumber::new(pool_supply)?;
+
+    let ratio = source_amount.checked_div(&swap_source_amount)?; // r = deposit / existing
+    let base = one.checked_add(&ratio)?; // 1+r
+    let root = base.sqrt()?.checked_sub(&one)?; // √(1+r) - 1
+    let pool_tokens = pool_supply.checked_mul(&root)?; // pool x (√(1+r) - 1)
+    match round_direction {
+        RoundDirection::Floor => pool_tokens.floor()?.to_imprecise(),
+        RoundDirection::Ceiling => pool_tokens.ceiling()?.to_imprecise(),
+    }
 }
 
 // ----------------------------------------------------------------------------- program pack

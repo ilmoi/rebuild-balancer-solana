@@ -69,6 +69,16 @@ pub trait CurveCalculator: Debug + DynPack {
         swap_token_b_amount: u128,
         round_direction: RoundDirection,
     ) -> Option<TradingTokenResult>;
+
+    // essentially performs a swap followed by a deposit
+    fn deposit_single_token_type(
+        &self,
+        source_amount: u128,
+        swap_token_a_amount: u128,
+        swap_token_b_amount: u128,
+        pool_supply: u128,
+        trade_direction: TradeDirection,
+    ) -> Option<u128>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

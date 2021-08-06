@@ -91,6 +91,35 @@ impl SwapCurve {
             trade_direction,
         )
     }
+
+    pub fn deposit_single_token_type(
+        &self,
+        source_amount: u128,
+        swap_token_a_amount: u128,
+        swap_token_b_amount: u128,
+        pool_supply: u128,
+        trade_direction: TradeDirection,
+        fees: &Fees,
+    ) -> Option<u128> {
+        if source_amount == 0 {
+            return Some(0);
+        }
+        // calc and sub the fee for trading half the tokens
+        // this makes sense - say user deposits 1000 tokens B
+        // in effect we're going to trade 500 B for A and the deposit 500B, 500A
+        // user who's depositing is responsible for paying the fee on that trade
+        let half_source_amount = std::cmp::max(1, source_amount.checked_div(2)?);
+        let trade_fee = fees.trading_fee(half_source_amount)?;
+        let source_amount = source_amount.checked_sub(trade_fee)?;
+
+        self.calculator.deposit_single_token_type(
+            source_amount,
+            swap_token_a_amount,
+            swap_token_b_amount,
+            pool_supply,
+            trade_direction,
+        )
+    }
 }
 
 /// Default implementation for SwapCurve cannot be derived because of
