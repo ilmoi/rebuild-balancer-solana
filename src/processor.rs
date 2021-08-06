@@ -3,7 +3,9 @@ use crate::curve::base::SwapCurve;
 use crate::curve::calculator::{RoundDirection, TradeDirection};
 use crate::curve::fees::Fees;
 use crate::error::SwapError;
-use crate::instruction::{DepositAllTokenTypes, Initialize, Swap, SwapInstruction};
+use crate::instruction::{
+    DepositAllTokenTypes, Initialize, Swap, SwapInstruction, WithdrawAllTokenTypes,
+};
 use crate::state::{SwapV1, SwapVersion};
 use solana_program::account_info::{next_account_info, AccountInfo};
 use solana_program::entrypoint::ProgramResult;
@@ -17,6 +19,7 @@ use std::convert::TryInto;
 pub struct Processor {}
 
 impl Processor {
+    // ============================================================================= unpacking
     pub fn unpack_token_account(
         account_info: &AccountInfo,
         token_program_id: &Pubkey,
@@ -40,6 +43,8 @@ impl Processor {
                 .map_err(|_| SwapError::ExpectedAccount)
         }
     }
+
+    // ============================================================================= token program ix
 
     pub fn token_mint_to<'a>(
         swap: &Pubkey,
@@ -92,7 +97,35 @@ impl Processor {
         )
     }
 
-    // ----------------------------------------------------------------------------- processors
+    pub fn token_burn<'a>(
+        swap: &Pubkey,
+        token_program: AccountInfo<'a>,
+        burn_account: AccountInfo<'a>,
+        mint: AccountInfo<'a>,
+        authority: AccountInfo<'a>,
+        nonce: u8,
+        amount: u64,
+    ) -> Result<(), ProgramError> {
+        let swap_bytes = swap.to_bytes();
+        let authority_signature_seeds = [&swap_bytes[..32], &[nonce]];
+        let signers = &[&authority_signature_seeds[..]];
+
+        let ix = spl_token::instruction::burn(
+            token_program.key,
+            burn_account.key,
+            mint.key,
+            authority.key,
+            &[],
+            amount,
+        )?;
+        invoke_signed(
+            &ix,
+            &[burn_account, mint, authority, token_program],
+            signers,
+        )
+    }
+
+    // ============================================================================= processors
 
     // 1)checks a bunch, 2)mints tokens into dest acc, 3)saves state into swap_info acc
     pub fn process_initialize(
@@ -105,7 +138,7 @@ impl Processor {
     ) -> ProgramResult {
         let account_info_iter = &mut accounts.iter();
         let swap_info = next_account_info(account_info_iter)?; //this will hold the state for a given pool, eg RAY-SOL
-        let authority_info = next_account_info(account_info_iter)?; //authority over pool tokens, todo derived from the token swap program?
+        let authority_info = next_account_info(account_info_iter)?; //authority over pool tokens, YES, derived from the token swap program
         let token_a_info = next_account_info(account_info_iter)?; //account that will hold token A for the pool
         let token_b_info = next_account_info(account_info_iter)?; //account that will hold token B for the pool
         let pool_mint_info = next_account_info(account_info_iter)?; //this is the mint address for the pool tokens - eg lpRAYSOL whatever
@@ -122,7 +155,7 @@ impl Processor {
         let pool_mint = Self::unpack_mint(pool_mint_info, &token_program_id)?;
 
         // check that both accounts A and B have some initial tokens in them
-        // todo why is this necessary? I suspect this is in place to ensure they exist and don't have to be created
+        // (!) newly created pool has to be immediately available for trading, which is why it can't be started with 0 balances in either/both
         swap_curve
             .calculator
             .validate_supply(token_a.amount, token_b.amount)?;
@@ -146,6 +179,7 @@ impl Processor {
         fees.validate()?;
 
         //initial amount of tokens in pool is a constant of 1_000_000_000
+        //(!) My understanding is that this initial supply is never actually withdrawn, it's simply sitting there to be used as a denominator for calculating how many tokens to issue to users
         let initial_amount = swap_curve.calculator.new_pool_supply();
 
         //invokes the spl program to mint tokens
@@ -267,7 +301,6 @@ impl Processor {
         // we don't want to withdraw X tokens, we want to withdraw POOL tokens
         // so we convert X tokens to pool tokens using a special ratio from the balancer paper
         // now this pool token amount can be split between all the parties that deserve it
-        // todo be sure to visualize this in the FE
         let mut pool_token_amount = token_swap
             .swap_curve()
             .withdraw_single_token_type_exact_out(
@@ -299,7 +332,7 @@ impl Processor {
                     pool_token_amount = pool_token_amount
                         .checked_sub(host_fee)
                         .ok_or(SwapError::FeeCalculationFailure)?;
-                    //mint tokens to host
+                    //mint tokens to host (20% of the 0.05%)
                     Self::token_mint_to(
                         swap_info.key,
                         token_program_info.clone(),
@@ -311,7 +344,7 @@ impl Processor {
                     )?;
                 }
             }
-            //mint tokens to exchange - todo which I guess are gonna be further divided between exchange and the LPs
+            //mint tokens to exchange (this is the owner reward) (80% of the 0.05%)
             Self::token_mint_to(
                 swap_info.key,
                 token_program_info.clone(),
@@ -339,7 +372,7 @@ impl Processor {
 
     pub fn process_deposit_all_token_types(
         program_id: &Pubkey,
-        pool_token_amount: u64, //todo weird, so we're specifying pool tokens... why? Maybe this is our way of signaling what % of the pool the user should own
+        pool_token_amount: u64,
         maximum_token_a_amount: u64, //for the purposes of slippage
         maximum_token_b_amount: u64, //for the purposes of slippage
         accounts: &[AccountInfo],
@@ -381,6 +414,9 @@ impl Processor {
         // ----------------------------------------------------------------------------- calc
 
         // token X amount to deposit, token Y amount to deposit
+        // this is based on balancer - " If a deposit of assets increases the pool Value Function by
+        // 10%, then the outstanding supply of pool tokens also increases by 10%. This happens because the depositor
+        // is issued 10% of new pool tokens in return for the deposit."
         let results = calculator
             .pool_tokens_to_trading_tokens(
                 pool_token_amount,        //outstanding pool token amount
@@ -390,6 +426,14 @@ impl Processor {
                 RoundDirection::Ceiling,
             )
             .ok_or(SwapError::ZeroTradingTokens)?;
+
+        msg!(
+            "{}, {}, {}, {}",
+            results.token_a_amount,
+            maximum_token_a_amount,
+            results.token_b_amount,
+            maximum_token_b_amount,
+        );
 
         let token_a_amount = to_u64(results.token_a_amount)?;
         if token_a_amount > maximum_token_a_amount {
@@ -446,7 +490,134 @@ impl Processor {
         Ok(())
     }
 
-    // ----------------------------------------------------------------------------- triage
+    pub fn process_withdraw_all_token_types(
+        program_id: &Pubkey,
+        pool_token_amount: u64,
+        minimum_token_a_amount: u64,
+        minimum_token_b_amount: u64,
+        accounts: &[AccountInfo],
+    ) -> ProgramResult {
+        let account_info_iter = &mut accounts.iter();
+
+        let swap_info = next_account_info(account_info_iter)?;
+        let authority_info = next_account_info(account_info_iter)?;
+        let user_transfer_authority_info = next_account_info(account_info_iter)?;
+        let pool_mint_info = next_account_info(account_info_iter)?;
+        let source_info = next_account_info(account_info_iter)?; // users' pool token account
+        let token_a_info = next_account_info(account_info_iter)?; //exchange's a account
+        let token_b_info = next_account_info(account_info_iter)?; //exchange's b account
+        let dest_token_a_info = next_account_info(account_info_iter)?; //user's token a
+        let dest_token_b_info = next_account_info(account_info_iter)?; //user's token b
+        let pool_fee_account_info = next_account_info(account_info_iter)?;
+        let token_program_info = next_account_info(account_info_iter)?;
+
+        let token_swap = SwapVersion::unpack(&swap_info.data.borrow())?;
+        let token_a = Self::unpack_token_account(token_a_info, token_swap.token_program_id())?;
+        let token_b = Self::unpack_token_account(token_b_info, token_swap.token_program_id())?;
+        let pool_mint = Self::unpack_mint(pool_mint_info, token_swap.token_program_id())?;
+
+        let calculator = &token_swap.swap_curve().calculator;
+        // ----------------------------------------------------------------------------- fees
+
+        // if we're withdrawing from the pool fee account then no fee
+        let withdraw_fee: u128 = if *pool_fee_account_info.key == *source_info.key {
+            0
+        } else {
+            //this will always be 0 in prod, because we're validating fees during pool creation and one of the constraints is for the denom to be 0
+            token_swap
+                .fees()
+                .owner_withdraw_fee(to_u128(pool_token_amount)?)
+                .ok_or(SwapError::FeeCalculationFailure)?
+        };
+
+        //sub fee from pool token amount to withdraw
+        let pool_token_amount = to_u128(pool_token_amount)?
+            .checked_sub(withdraw_fee)
+            .ok_or(SwapError::CalculationFailure)?;
+
+        // ----------------------------------------------------------------------------- calc A and B tokens, similar to deposit
+
+        let results = calculator
+            .pool_tokens_to_trading_tokens(
+                pool_token_amount,
+                to_u128(pool_mint.supply)?,
+                to_u128(token_a.amount)?,
+                to_u128(token_b.amount)?,
+                RoundDirection::Floor,
+            )
+            .ok_or(SwapError::ZeroTradingTokens)?;
+
+        let token_a_amount = to_u64(results.token_a_amount)?;
+        let token_a_amount = std::cmp::min(token_a.amount, token_a_amount); //to prevent token balance going negative
+        if token_a_amount < minimum_token_a_amount {
+            return Err(SwapError::ExceededSlippage.into());
+        }
+        if token_a_amount == 0 && token_a.amount != 0 {
+            return Err(SwapError::ZeroTradingTokens.into());
+        }
+
+        let token_b_amount = to_u64(results.token_b_amount)?;
+        let token_b_amount = std::cmp::min(token_b.amount, token_b_amount); //to prevent token balance going negative
+        if token_b_amount < minimum_token_b_amount {
+            return Err(SwapError::ExceededSlippage.into());
+        }
+        if token_b_amount == 0 && token_b.amount != 0 {
+            return Err(SwapError::ZeroTradingTokens.into());
+        }
+
+        // ----------------------------------------------------------------------------- execution
+
+        // first move the withdraw fee from source account to pool's fee account
+        if withdraw_fee > 0 {
+            Self::token_transfer(
+                swap_info.key,
+                token_program_info.clone(),
+                source_info.clone(), //we're paying the pool withdrawal fee in pool tokens...
+                pool_fee_account_info.clone(),
+                user_transfer_authority_info.clone(),
+                token_swap.nonce(),
+                to_u64(withdraw_fee)?,
+            )?;
+        }
+        //then we burn the remaining lp tokens in user's token account
+        Self::token_burn(
+            swap_info.key,
+            token_program_info.clone(),
+            source_info.clone(),
+            pool_mint_info.clone(),
+            user_transfer_authority_info.clone(), //must have the authority over burn_account
+            token_swap.nonce(),
+            to_u64(pool_token_amount)?,
+        )?;
+
+        //move A and B tokens from exchange to user
+        if token_a_amount > 0 {
+            Self::token_transfer(
+                swap_info.key,
+                token_program_info.clone(),
+                token_a_info.clone(),
+                dest_token_a_info.clone(),
+                authority_info.clone(),
+                token_swap.nonce(),
+                token_a_amount,
+            )?;
+        }
+        if token_b_amount > 0 {
+            Self::token_transfer(
+                swap_info.key,
+                token_program_info.clone(),
+                token_b_info.clone(),
+                dest_token_b_info.clone(),
+                authority_info.clone(),
+                token_swap.nonce(),
+                token_b_amount,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    // ============================================================================= triage
 
     pub fn process(
         program_id: &Pubkey,
@@ -498,6 +669,20 @@ impl Processor {
                     pool_token_amount,
                     maximum_token_a_amount,
                     maximum_token_b_amount,
+                    accounts,
+                )
+            }
+            SwapInstruction::WithdrawAllTokenTypes(WithdrawAllTokenTypes {
+                pool_token_amount,
+                minimum_token_a_amount,
+                minimum_token_b_amount,
+            }) => {
+                msg!("Instruction: WithdrawAllTokenTypes");
+                Self::process_withdraw_all_token_types(
+                    program_id,
+                    pool_token_amount,
+                    minimum_token_a_amount,
+                    minimum_token_b_amount,
                     accounts,
                 )
             }

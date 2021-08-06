@@ -6,16 +6,17 @@ use std::convert::TryFrom;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Fees {
-    //to LPs todo does this include the owner trade fee? I suspect not
+    //to LPs - EXCLUDING THE OWNER FEES, the two are calced and handled separately
     pub trade_fee_numerator: u64,
     pub trade_fee_denominator: u64,
     //to swap ctr owner
     pub owner_trade_fee_numerator: u64,
     pub owner_trade_fee_denominator: u64,
-    //todo wtf is this fee?
+    /// Owner withdraw fees are extra liquidity pool token amounts that are sent to the owner on every withdrawal.
+    /// these are modelled based on balancer - https://balancer.fi/whitepaper.pdf (see swap and exit fees)
     pub owner_withdraw_fee_numerator: u64,
     pub owner_withdraw_fee_denominator: u64,
-    //to UI host
+    //to UI host - taken as proportion of owner trading fees
     pub host_fee_numerator: u64,
     pub host_fee_denominator: u64,
 }
@@ -35,7 +36,7 @@ impl Fees {
         Ok(())
     }
 
-    /// Calculate the withdraw fee in pool tokens
+    /// Calculate the withdraw fee in pool tokens - used when double sided withdrawals are called
     pub fn owner_withdraw_fee(&self, pool_tokens: u128) -> Option<u128> {
         calculate_fee(
             pool_tokens,

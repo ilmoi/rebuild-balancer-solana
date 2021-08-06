@@ -9,7 +9,6 @@ use solana_program::{
 
 // ----------------------------------------------------------------------------- swap state trait
 
-//todo not super sure what's the purpose of this, given it's just replicating public fields?
 /// Trait representing access to program state across all versions
 #[enum_dispatch]
 pub trait SwapState {

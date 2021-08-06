@@ -58,8 +58,9 @@ impl SwapCurve {
                 .checked_sub(destination_amount_swapped)?,
             source_amount_swapped,
             destination_amount_swapped,
-            trade_fee, //todo this doesn't seem to be captured in any way?
-            owner_fee,
+            //modelled based on balancer - /// "100% of the swap fee goes to the liquidity providers — the amount of the underlying token that can beredeemed by each pool token increases."
+            trade_fee, //(!) THIS NEVER GETS TAKEN OUT. THIS IS LEFT IN THE POOL, SO THAT THE POOL ACCRUES VALUE OVER TIME. THATS HOW LPS ARE COMPENSATED
+            owner_fee, //this does get taken out and is minted to the owner / host
         })
     }
 
@@ -78,7 +79,6 @@ impl SwapCurve {
         }
 
         // calc and sub the trading fee on half the tokens
-        // todo so this is like trade fee on trade fee? why?
         let half_source_amount = std::cmp::max(1, source_amount.checked_div(2)?);
         let trade_fee = fees.trading_fee(half_source_amount)?;
         let source_amount = source_amount.checked_sub(trade_fee)?;

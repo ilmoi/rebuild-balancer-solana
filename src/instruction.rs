@@ -570,7 +570,6 @@ pub fn swap(
 }
 
 /// Unpacks a reference from a bytes buffer.
-/// TODO actually pack / unpack instead of relying on normal memory layout.
 pub fn unpack<T>(input: &[u8]) -> Result<&T, ProgramError> {
     if input.len() < size_of::<u8>() + size_of::<T>() {
         return Err(ProgramError::InvalidAccountData);
