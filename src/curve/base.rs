@@ -1,4 +1,5 @@
 use crate::curve::calculator::{CurveCalculator, SwapWithoutFeesResult, TradeDirection};
+use crate::curve::constant_price::ConstantPriceCurve;
 use crate::curve::constant_product::ConstantProductCurve;
 use crate::curve::fees::Fees;
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
@@ -10,6 +11,7 @@ use std::convert::{TryFrom, TryInto};
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum CurveType {
     ConstantProduct,
+    ConstantPrice,
 }
 
 //chooses one curve and links the relevant Calculator trait implementation
@@ -173,7 +175,7 @@ impl TryFrom<u8> for CurveType {
     fn try_from(curve_type: u8) -> Result<Self, Self::Error> {
         match curve_type {
             0 => Ok(CurveType::ConstantProduct),
-            // 1 => Ok(CurveType::ConstantPrice),
+            1 => Ok(CurveType::ConstantPrice),
             // 2 => Ok(CurveType::Stable),
             // 3 => Ok(CurveType::Offset),
             _ => Err(ProgramError::InvalidAccountData),
@@ -203,9 +205,9 @@ impl Pack for SwapCurve {
                 CurveType::ConstantProduct => {
                     Box::new(ConstantProductCurve::unpack_from_slice(calculator)?)
                 }
-                // CurveType::ConstantPrice => {
-                //     Box::new(ConstantPriceCurve::unpack_from_slice(calculator)?)
-                // }
+                CurveType::ConstantPrice => {
+                    Box::new(ConstantPriceCurve::unpack_from_slice(calculator)?)
+                }
                 // CurveType::Stable => Box::new(StableCurve::unpack_from_slice(calculator)?),
                 // CurveType::Offset => Box::new(OffsetCurve::unpack_from_slice(calculator)?),
             },

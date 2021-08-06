@@ -6,6 +6,7 @@ const {Token, TOKEN_PROGRAM_ID} = require('@solana/spl-token')
 // ----------------------------------------------------------------------------- constants
 
 const TOKEN_SWAP_PROGRAM_ID = new PublicKey('AStiSsWN3KVdCKnhifLYcw4M4Ey8LMUA9p2Ka6bsGtf8'); //no need to change in the lib, we can just change here
+// const TOKEN_SWAP_PROGRAM_ID = new PublicKey('B2pRB7qNuBm4Lzovj8UFUgi9voBbnwwMkFGUtb6RhXK6');
 // (!)This seems to be used throughout the code as a PRODUCTION ON/OFF SWITCH
 const SWAP_PROGRAM_OWNER_FEE_ADDRESS = "AFe99p6byLxYfEV9E1nNumSeKdtgXm2HL5Gy5dN6icj9";
 
@@ -14,12 +15,13 @@ const TRADING_FEE_NUMERATOR = 25; //0.25% to LPs, modelled on uniswap
 const TRADING_FEE_DENOMINATOR = 10000;
 const OWNER_TRADING_FEE_NUMERATOR = 5; //0.05% to exchange, modelled on uniswap
 const OWNER_TRADING_FEE_DENOMINATOR = 10000;
-const OWNER_WITHDRAW_FEE_NUMERATOR = 1;
-const OWNER_WITHDRAW_FEE_DENOMINATOR = 6;
+const OWNER_WITHDRAW_FEE_NUMERATOR = 0;
+const OWNER_WITHDRAW_FEE_DENOMINATOR = 0;
 const HOST_FEE_NUMERATOR = 20; //ui host gets 1/5 of the fees of the protocol
 const HOST_FEE_DENOMINATOR = 100;
 
-const CURVE_TYPE = CurveType.ConstantProduct;
+// const CURVE_TYPE = CurveType.ConstantProduct;
+const CURVE_TYPE = CurveType.ConstantPrice; //todo note constant price won't work without fixing this first - https://github.com/solana-labs/solana-program-library/issues/2234
 
 // Initial amount in each swap token (1m each)
 const currentSwapTokenA = 1000000;
@@ -30,7 +32,7 @@ const currentSwapTokenB = 1000000;
 // need to get slightly tweaked in the two cases.
 const SWAP_AMOUNT_IN = 100000;
 const SWAP_AMOUNT_OUT = SWAP_PROGRAM_OWNER_FEE_ADDRESS ? 90661 : 90674;
-// Pool token amount to withdraw / deposit (10m or 1%)
+// Pool token amount to withdraw / deposit (10m or 1% of 1bn)
 const POOL_TOKEN_AMOUNT = 10000000;
 
 // ----------------------------------------------------------------------------- globals state
@@ -138,12 +140,12 @@ async function createSwap() {
   // --------------------------------------- user A token
   console.log('Creating USER token a account');
   userAccountA = await mintA.createAccount(owner.publicKey);
-  await mintA.mintTo(userAccountA, owner, [], SWAP_AMOUNT_IN*10); //enough to play with
+  await mintA.mintTo(userAccountA, owner, [], SWAP_AMOUNT_IN*20); //enough to play with
 
   // --------------------------------------- user B token
   console.log('Creating USER token b account');
   userAccountB = await mintB.createAccount(owner.publicKey);
-  await mintB.mintTo(userAccountB, owner, [], SWAP_AMOUNT_IN*10); //enough to play with
+  await mintB.mintTo(userAccountB, owner, [], SWAP_AMOUNT_IN*20); //enough to play with
 
   // --------------------------------------- user pool token account
   console.log('Creating USER pool token account');
@@ -261,14 +263,14 @@ async function depositAllTokenTypes() {
     userTransferAuthority.publicKey,
     owner,
     [],
-    tokenA, //amount of token A
+    tokenA*2, //amount of token A //had to make it *2 for constant price curve to work
   );
   await mintB.approve(
     userAccountB,
     userTransferAuthority.publicKey,
     owner,
     [],
-    tokenB, //amount of token B
+    tokenB*2, //amount of token B //had to make it *2 for constant price curve to work
   );
 
   console.log('Depositing into swap');
@@ -278,8 +280,8 @@ async function depositAllTokenTypes() {
     userAccountPool,
     userTransferAuthority,
     POOL_TOKEN_AMOUNT,
-    tokenA,
-    tokenB,
+    tokenA*2, //had to make it *2 for constant price curve to work
+    tokenB*2, //had to make it *2 for constant price curve to work
   );
 
 }
@@ -325,8 +327,8 @@ async function withdrawAllTokenTypes() {
     userAccountPool,
     userTransferAuthority,
     POOL_TOKEN_AMOUNT,
-    tokenA,
-    tokenB,
+    tokenA/2, //had to make it /2 for constant price curve to work
+    tokenB/2, //had to make it /2 for constant price curve to work
   );
 }
 
@@ -375,17 +377,17 @@ async function depositSingleTokenTypeExactAmountIn() {
     userAccountPool,
     userTransferAuthority,
     depositAmount,
-    poolTokenA,
+    poolTokenA/2, //had to make it /2 for constant price curve to work
   );
 
-  console.log('Depositing token B into swap');
-  await tokenSwap.depositSingleTokenTypeExactAmountIn(
-    userAccountB,
-    userAccountPool,
-    userTransferAuthority,
-    depositAmount,
-    poolTokenB,
-  );
+  // console.log('Depositing token B into swap');
+  // await tokenSwap.depositSingleTokenTypeExactAmountIn(
+  //   userAccountB,
+  //   userAccountPool,
+  //   userTransferAuthority,
+  //   depositAmount,
+  //   poolTokenB/2, //had to make it /2 for constant price curve to work
+  // );
 
 }
 
@@ -440,7 +442,7 @@ async function withdrawSingleTokenTypeExactAmountOut() {
     userAccountPool,
     userTransferAuthority,
     withdrawAmount,
-    adjustedPoolTokenA,
+    adjustedPoolTokenA*2, //had to make it *2 for constant price curve to work
   );
 
   console.log('Withdrawing token B only');
@@ -449,7 +451,7 @@ async function withdrawSingleTokenTypeExactAmountOut() {
     userAccountPool,
     userTransferAuthority,
     withdrawAmount,
-    adjustedPoolTokenB,
+    adjustedPoolTokenB*2, //had to make it *2 for constant price curve to work
   );
 }
 
@@ -498,16 +500,16 @@ async function play() {
   await getConnection();
   await createSwap();
   await printAllBalances();
-  await swap();
-  await printAllBalances();
-  await depositAllTokenTypes();
-  await printAllBalances();
-  await withdrawAllTokenTypes();
-  await printAllBalances();
+  // await swap();
+  // await printAllBalances();
+  // await depositAllTokenTypes();
+  // await printAllBalances();
+  // await withdrawAllTokenTypes();
+  // await printAllBalances();
   await depositSingleTokenTypeExactAmountIn();
   await printAllBalances();
-  await withdrawSingleTokenTypeExactAmountOut();
-  await printAllBalances();
+  // await withdrawSingleTokenTypeExactAmountOut();
+  // await printAllBalances();
 }
 
 play()

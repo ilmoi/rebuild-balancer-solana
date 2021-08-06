@@ -6,6 +6,7 @@ use crate::curve::{base::SwapCurve, fees::Fees};
 use crate::error::SwapError;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
+    msg,
     program_error::ProgramError,
     program_pack::Pack,
     pubkey::Pubkey,
@@ -200,6 +201,9 @@ impl SwapInstruction {
                     let (fees, rest) = rest.split_at(Fees::LEN);
                     let fees = Fees::unpack_unchecked(fees)?;
                     let swap_curve = SwapCurve::unpack_unchecked(rest)?;
+
+                    msg!("swap curve is: {:?}", swap_curve);
+
                     Self::Initialize(Initialize {
                         nonce,
                         fees,

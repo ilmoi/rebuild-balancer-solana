@@ -179,6 +179,9 @@ impl Processor {
         //checks fee denominators aren't 0 and that numerator < denominator
         fees.validate()?;
 
+        //validates that the given curve has no invalid params
+        swap_curve.calculator.validate()?;
+
         //initial amount of tokens in pool is a constant of 1_000_000_000
         //(!) My understanding is that this initial supply is never actually withdrawn, it's simply sitting there to be used as a denominator for calculating how many tokens to issue to users
         let initial_amount = swap_curve.calculator.new_pool_supply();
@@ -345,7 +348,7 @@ impl Processor {
                     )?;
                 }
             }
-            //mint tokens to exchange (this is the owner reward) (80% of the 0.05%)
+            //mint tokens to owner (80% of the 0.05%)
             Self::token_mint_to(
                 swap_info.key,
                 token_program_info.clone(),
@@ -427,6 +430,14 @@ impl Processor {
                 RoundDirection::Ceiling,
             )
             .ok_or(SwapError::ZeroTradingTokens)?;
+
+        msg!(
+            "{}, {}, {}, {}",
+            results.token_a_amount,
+            maximum_token_a_amount,
+            results.token_b_amount,
+            maximum_token_b_amount,
+        );
 
         let token_a_amount = to_u64(results.token_a_amount)?;
         if token_a_amount > maximum_token_a_amount {
@@ -560,7 +571,7 @@ impl Processor {
 
         // ----------------------------------------------------------------------------- execution
 
-        // first move the withdraw fee from source account to pool's fee account
+        // first move the withdraw fee from source account to owner's fee account
         if withdraw_fee > 0 {
             Self::token_transfer(
                 swap_info.key,

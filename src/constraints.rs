@@ -21,14 +21,13 @@ const FEES: &Fees = &Fees {
     owner_trade_fee_numerator: 5,
     owner_trade_fee_denominator: 10000,
     owner_withdraw_fee_numerator: 0,
-    owner_withdraw_fee_denominator: 0, //todo so in production we want this to always be 0? weird
+    owner_withdraw_fee_denominator: 0,
     // 20% of the owner fee goes to host
     host_fee_numerator: 20,
     host_fee_denominator: 100,
 };
 
 pub const SWAP_CONSTRAINTS: Option<SwapConstraints> = {
-    //todo how and when is this feature enabled?
     #[cfg(feature = "production")]
     {
         Some(SwapConstraints {
@@ -43,7 +42,7 @@ pub const SWAP_CONSTRAINTS: Option<SwapConstraints> = {
     }
 };
 
-const VALID_CURVE_TYPES: &[CurveType] = &[CurveType::ConstantProduct];
+const VALID_CURVE_TYPES: &[CurveType] = &[CurveType::ConstantProduct, CurveType::ConstantPrice];
 
 impl<'a> SwapConstraints<'a> {
     pub fn validate_curve(&self, swap_curve: &SwapCurve) -> Result<(), ProgramError> {
